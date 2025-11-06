@@ -239,6 +239,42 @@ void sad_eye() {
   center_eyes(true);
 }
 
+void draw_happy_mouth() {
+// 1. Limpa a tela TODA, mas redesenha a UI (barras de status)
+  display.clearDisplay();
+  drawInterface(); // Garante que as barras de status continuem visíveis
+
+  // 2. Vamos calcular onde os ^^ devem ficar.
+  // Usamos as mesmas posições centrais dos olhos originais.
+  int centerY = (SCREEN_HEIGHT - UI_HEIGHT) / 2 + UI_HEIGHT;
+  int centerX_Left = SCREEN_WIDTH / 2 - REF_EYE_WIDTH / 2 - REF_SPACE_BETWEEN_EYE / 2;
+  int centerX_Right = SCREEN_WIDTH / 2 + REF_EYE_WIDTH / 2 + REF_SPACE_BETWEEN_EYE / 2;
+
+  // 3. Definir o tamanho do ^
+  int eyeSize = 10; // O "tamanho" do ^
+  int eyeTopY = centerY - (eyeSize / 2);
+  int eyeBottomY = centerY + (eyeSize / 2);
+
+  // 4. Desenhar o ^ esquerdo (substituindo o olho esquerdo)
+  // Linha 1 (/)
+  display.drawLine(centerX_Left - eyeSize, eyeBottomY, centerX_Left, eyeTopY, SSD1306_WHITE);
+  // Linha 2 (\)
+  display.drawLine(centerX_Left, eyeTopY, centerX_Left + eyeSize, eyeBottomY, SSD1306_WHITE);
+
+  // 5. Desenhar o ^ direito (substituindo o olho direito)
+  // Linha 1 (/)
+  display.drawLine(centerX_Right - eyeSize, eyeBottomY, centerX_Right, eyeTopY, SSD1306_WHITE);
+  // Linha 2 (\)
+  display.drawLine(centerX_Right, eyeTopY, centerX_Right + eyeSize, eyeBottomY, SSD1306_WHITE);
+
+  // 6. Envia o desenho (UI + ^^) para a tela
+  display.display();
+  delay(1500); // Mostra a expressão por 1.5 segundos
+
+  // 7. Restaura os olhos normais
+  center_eyes(true);
+}
+
 
 // =========================================================================
 // FUNÇÕES PARA O SERVIDOR WEB (Callbacks) (MODIFICADO)
@@ -441,7 +477,7 @@ void loop() {
       requestedAnimation = 1;  // Acorda
     } else {
       felicidade = min(100, felicidade + 25);  // Aumenta 25
-      requestedAnimation = 3;  // Animação "feliz"
+      requestedAnimation = 7;  // Animação "feliz"
     }
   }
 
@@ -454,6 +490,7 @@ void loop() {
       case 4: sleep_anim(); break;  //
       case 5: move_left_big_eye(); break;  //
       case 6: move_right_big_eye(); break;  //
+      case 7: draw_happy_mouth(); break;
     }
     requestedAnimation = 0;  //
   }
