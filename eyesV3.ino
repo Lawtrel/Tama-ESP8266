@@ -3,10 +3,16 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // --- Configurações do Wi-Fi ---
 const char* ssid = "S24 de Lawtrel";
 const char* password = "qwertyuiop";
+
+const long utcOffsetInSeconds = -10800; 
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 // --- Configurações do Display ---
 #define SCREEN_WIDTH 128
@@ -42,6 +48,9 @@ volatile int requestedAnimation = 0;
 
 unsigned long lastInteractionTime = 0;
 const long boredomInterval = 60000; // 1 minuto
+String currentEmotionString = "contente";
+String timeString = "--:--";
+
 
 // --- Estado do Jogo --- //
 int score = 0;
@@ -220,6 +229,13 @@ void blink() {
 
 void wakeup() {
   estaDormindo = false;
+  // Fanfarra de despertar: Tu-tu-tu-TUUUU!
+  tone(pinoBuzzer, 1046, 100); delay(120); // C6
+  tone(pinoBuzzer, 1046, 100); delay(120); // C6
+  tone(pinoBuzzer, 1046, 100); delay(120); // C6
+  tone(pinoBuzzer, 1318, 400); delay(400); // E6 (Longo)
+  noTone(pinoBuzzer);
+
   center_eyes(false);
   for (int h = 0; h <= REF_EYE_HEIGHT; h += 2) {
     left_eye_height = h;
@@ -338,62 +354,208 @@ void sad_eye() {
   noTone(pinoBuzzer);
 }
 
+void play_snore() {
+  // Faz um som grave e vibrante (Rrr...)
+  for(int i=0; i<3; i++) {
+    tone(pinoBuzzer, 60); delay(100);
+    tone(pinoBuzzer, 50); delay(100);
+  }
+  noTone(pinoBuzzer);
+}
+
+void play_whistle() {
+  // Primeira nota (grave -> aguda)
+  for (int f = 1000; f < 2000; f += 50) {
+    tone(pinoBuzzer, f);
+    delay(5);
+  }
+  noTone(pinoBuzzer);
+  delay(100); // Pausa
+  
+  // Segunda nota (aguda e longa)
+  tone(pinoBuzzer, 2000, 300);
+  delay(300);
+  noTone(pinoBuzzer);
+}
 
 // =========================================================================
 // FUNÇÕES DO SERVIDOR WEB
 // =========================================================================
 void handleRoot() {
-  // <-- HTML atualizado com "Fome", "Jogar" e 3 status
   String html = R"rawliteral(
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Digitama</title>
+  <title>Digitama Voz</title>
   <style>
     body { font-family: Arial, sans-serif; background-color: #2c3e50; color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; }
     h1 { margin-bottom: 10px; }
+    .face-display { font-size: 4.5em; color: #ecf0f1; text-align: center; margin: 10px 0; height: 80px; line-height: 80px; }
+    .time-display { font-size: 1.2em; color: #bdc3c7; margin-bottom: 15px; }
     .stats { background-color: #34495e; padding: 10px; border-radius: 8px; margin-bottom: 20px; width: 90%; max-width: 400px; text-align: center; font-size: 1.1em; }
     .button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 400px; width: 90%; }
     button { background-color: #3498db; color: white; border: none; border-radius: 8px; padding: 20px; font-size: 1.2em; cursor: pointer; transition: background-color 0.3s; }
     button:hover { background-color: #2980b9; }
-    p { grid-column: 1 / -1; text-align: center; margin: 10px 0 0 0; font-size: 1.1em; }
     .full-width { grid-column: 1 / -1; }
-    .btn-food { background-color: #27ae60; } /* Verde */
-    .btn-game { background-color: #e67e22; } /* Laranja */
+    .btn-mic { background-color: #e74c3c; font-weight: bold; }
+    .btn-mic.listening { background-color: #c0392b; animation: pulse 1s infinite; }
+    .btn-test { background-color: #9b59b6; font-size: 0.9em; margin-top: 10px; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+    #voice-status { font-size: 0.9em; color: #f1c40f; margin-top: 5px; min-height: 20px;}
   </style>
 </head>
 <body>
-  <h1>Controle Tamagotchi</h1>
-  <div class="stats">
-    E: <span id="energia">--</span>% | F: <span id="felicidade">--</span>% | A: <span id="fome">--</span>%
+  <h1>Controle Digitama</h1>
+  
+  <div id="tamagotchi-face" class="face-display">(•‿•)</div>
+  <div id="time-now" class="time-display">--:--</div>
+  
+  <div style="width: 90%; max-width: 400px; margin-bottom: 10px; text-align:center;">
+    <button id="btn-voice" class="full-width btn-mic" onclick="toggleVoice()">🎙️ Falar com ele</button>
+    <p id="voice-status">Toque para falar...</p>
+    <button class="full-width btn-test" onclick="testAudio()">🔊 Testar Som do Telemóvel</button>
   </div>
+
+  <div class="stats">
+    E: <span id="energia">--</span>% | H: <span id="felicidade">--</span>% | F: <span id="fome">--</span>%
+  </div>
+  
   <div class="button-grid">
-    <button data-action="jogar" class="full-width btn-game">Jogar Mini-Jogo</button>
-    <button data-action="alimentar" class="full-width btn-food">Alimentar</button>
+    <button data-action="jogar" class="full-width" style="background-color:#e67e22">Jogar</button>
+    <button data-action="alimentar" style="background-color:#27ae60">Comer</button>
+    <button data-action="happy">Brincar</button>
     <button data-action="wakeup">Acordar</button>
     <button data-action="sleep">Dormir</button>
     <button data-action="blink">Piscar</button>
-    <button data-action="happy">Feliz</button>
-    <button data-action="left">Olhar Esq.</button>
-    <button data-action="right">Olhar Dir.</button>
+    <button data-action="left">Esq.</button>
+    <button data-action="right">Dir.</button>
   </div>
+  
   <script>
-    document.querySelectorAll('button').forEach(button => {
-      button.addEventListener('click', () => {
-        const action = button.dataset.action;
-        fetch('/' + action).then(() => { getStats(); });
+    // --- Configuração de Voz (Web Speech API) ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'pt-BR';
+      recognition.continuous = false;
+    } else {
+      document.getElementById('voice-status').innerText = "Seu navegador não suporta voz.";
+    }
+    
+    let lastEmotion = "";
+    
+    // ===============================================
+    // --- FUNÇÃO 'SPEAK' (VOZ) MODIFICADA (PLANO B) ---
+    // ===============================================
+    function speak(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        // Removemos a exigência do pt-BR para usar a voz padrão
+        // u.lang = 'pt-BR'; 
+        window.speechSynthesis.speak(u);
+      } else {
+        alert("API de Fala (Speech API) não encontrada!");
+      }
+    }
+
+    function testAudio() {
+      speak("Teste de áudio. Se ouvir isto, está a funcionar.");
+    }
+
+    function toggleVoice() {
+      const statusEl = document.getElementById('voice-status');
+      if (!recognition) {
+        statusEl.innerText = "Erro: Navegador não suporta API de voz.";
+        return;
+      }
+      try {
+        recognition.start();
+        document.getElementById('btn-voice').classList.add('listening');
+        statusEl.innerText = "Ouvindo... Fale agora!";
+      } catch (e) {
+        statusEl.innerText = "Erro ao iniciar: " + e.message;
+        if (e.message && e.message.includes("permission")) {
+           alert("Permissão negada! No Android/Chrome, precisa ativar 'Insecure origins' em chrome://flags para IPs locais.");
+        }
+      }
+    }
+
+    if (recognition) {
+      recognition.onresult = function(event) {
+        const cmd = event.results[0][0].transcript.toLowerCase();
+        document.getElementById('voice-status').innerText = "Ouvi: " + cmd;
+        processVoiceCommand(cmd);
+        document.getElementById('btn-voice').classList.remove('listening');
+      };
+      recognition.onerror = function(e) {
+        let msg = e.error;
+        if (e.error === 'not-allowed') msg = "Microfone bloqueado. Verifique permissões.";
+        if (e.error === 'network') msg = "Erro de rede (HTTPS necessário?).";
+        document.getElementById('voice-status').innerText = "Erro: " + msg;
+        document.getElementById('btn-voice').classList.remove('listening');
+      };
+    }
+
+    function processVoiceCommand(cmd) {
+      if (cmd.includes("alimentar") || cmd.includes("comer")) triggerAction('alimentar', "Nham nham!");
+      else if (cmd.includes("brincar") || cmd.includes("feliz")) triggerAction('happy', "Brincar!");
+      else if (cmd.includes("dormir") || cmd.includes("sono")) triggerAction('sleep', "Zzz...");
+      else if (cmd.includes("acordar") || cmd.includes("bom dia")) triggerAction('wakeup', "Bom dia!");
+      else speak("Não entendi.");
+    }
+
+    function triggerAction(action, resp) {
+      if (action === 'alimentar' || action === 'happy') { 
+          document.getElementById('tamagotchi-face').innerText = "(^o^)"; 
+      }
+      speak(resp);
+      fetch('/' + action).then(() => { getStats(); });
+    }
+
+    document.querySelectorAll('button[data-action]').forEach(b => {
+      b.addEventListener('click', () => {
+        fetch('/' + b.dataset.action).then(() => getStats());
       });
     });
+
     function getStats(){
       fetch('/stats').then(r => r.json()).then(d => {
         document.getElementById('energia').innerText = d.energia;
         document.getElementById('felicidade').innerText = d.felicidade;
-        document.getElementById('fome').innerText = d.fome; // <-- Atualiza Fome
+        document.getElementById('fome').innerText = d.fome;
+        document.getElementById('time-now').innerText = d.hora
+        
+        const faceEl = document.getElementById('tamagotchi-face');
+        let face = "(•‿•)";
+
+        if (d.emocao !== lastEmotion) {
+           switch (d.emocao) {
+             case "faminto": speak("Preciso de comida!"); break;
+             case "triste": speak("Estou muito triste."); break;
+             case "doente": speak("Não me sinto nada bem... Estou doente."); break;
+             case "sonolento": speak("Que sono..."); break;
+             case "entediado": speak("Não há nada para fazer?"); break;
+           }
+           lastEmotion = d.emocao;
+        }
+        
+        switch (d.emocao) {
+          case "faminto": case "triste": face = "(T_T)"; break;
+          case "doente": face = "(X_X)"; break;
+          case "sonolento": face = "(-_-)"; break;
+          case "sonolento_feliz": face = "(^.^)"; break;
+          case "entediado": face = "(•_•)"; break;
+          case "dormindo": face = "(-_-) zZz"; break;
+        }
+        faceEl.innerText = face;
       });
     }
-    setInterval(getStats, 2000); document.addEventListener('DOMContentLoaded', getStats);
+    setInterval(getStats, 4000); // <-- Atualiza a cada 4s para reduzir lag
+    document.addEventListener('DOMContentLoaded', getStats);
   </script>
 </body>
 </html>
@@ -403,7 +565,7 @@ void handleRoot() {
 
 // --- Rota de Status ---
 void handleStats() {
-  String json = "{\"energia\":" + String(energia) + ", \"felicidade\":" + String(felicidade) + ", \"fome\":" + String(fome) + "}";
+  String json = "{\"energia\":" + String(energia) + ", \"felicidade\":" + String(felicidade) + ", \"fome\":" + String(fome) + ", \"emocao\":\"" + currentEmotionString + "\", \"hora\":\"" + timeString + "\"}";
   server.send(200, "application/json", json);
 }
 
@@ -465,6 +627,8 @@ void setup() {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
   Serial.println("\nWiFi conectado!"); Serial.print("IP: "); Serial.println(WiFi.localIP());
+  timeClient.begin();
+  timeClient.update();
 
   display.clearDisplay(); display.setCursor(0, 0);
   display.println("Conectado!"); display.println("IP:"); display.println(WiFi.localIP());
@@ -593,6 +757,9 @@ void game_loop() {
 // =========================================================================
 void tamagotchi_loop() {
   unsigned long currentMillis = millis();
+  timeClient.update();
+  timeString = timeClient.getFormattedTime();
+  int currentHour = timeClient.getHours();
 
   // --- Lógica de Decadência de Status ---
   if (currentMillis - previousMillisStats >= intervalStats) {
@@ -608,11 +775,15 @@ void tamagotchi_loop() {
   int touchState = digitalRead(pinoTouch);
   if (touchState == HIGH && (currentMillis - lastTouchTime > touchCooldown)) {
     lastTouchTime = currentMillis;
-    Serial.println("Toque (carinho) detectado!");
+    Serial.println("Toque detectado!");
     lastInteractionTime = currentMillis; // <-- RESTAURADO (Fase 3)
     
     if (estaDormindo) {
-      requestedAnimation = 1; // Acorda
+      // Se for de noite (entre 22h e 8h), ele recusa-se a acordar!
+      if (currentHour >= 22 || currentHour < 8) {
+      } else {
+        requestedAnimation = 1; // Acorda se for dia
+      }
     } else {
       felicidade = min(100, felicidade + 25);
       requestedAnimation = 7; // Expressão ^^ (RESTAURADO)
@@ -637,16 +808,24 @@ void tamagotchi_loop() {
   // --- Lógica de Comportamento Autônomo (O MOTOR de Emoções) ---
   // ===========================================================
   else if (!estaDormindo) {
+    if (currentHour >= 22 || currentHour < 8) {
+      sleep_anim(); // Vai dormir
+      currentEmotionString = "dormindo";
+      delay(1000);
+      return; // Sai da função para não executar o resto
+    }
     
     // --- ESTADO CRÍTICO (Prioridade Máxima) ---
     if (fome < 10 && energia < 10 && felicidade < 10) {
       // 1. "DOENTE" (Tudo baixo)
+      currentEmotionString = "doente";
       draw_sick_face(); // (X X)
       delay(2000);
     
     // --- ESTADOS DE NECESSIDADE (Prioridade Média) ---
     } else if (fome < 30) {
       // 2. "FAMINTO"
+      currentEmotionString = "faminto";
       sad_eye();
       delay(1000);
     
@@ -654,11 +833,13 @@ void tamagotchi_loop() {
       // 3. "SONOLENTO" (Lógica Combinatória)
       if (felicidade > 80) {
         // 3a. Sonolento mas FELIZ
+        currentEmotionString = "sonolento_feliz";
         draw_sleepy_happy_face(); // (olhos fechados + ^^)
       } else {
         // 3b. Sonolento normal
         center_eyes(false);
         left_eye_height = 5; right_eye_height = 5;
+        currentEmotionString = "sonolento";
         draw_eyes(true);
       }
       delay(1000);
@@ -666,28 +847,54 @@ void tamagotchi_loop() {
     // --- ESTADOS EMOCIONAIS (Prioridade Baixa) ---
     } else if (felicidade < 30) {
       // 4. "INFELIZ"
+      currentEmotionString = "triste";
       sad_eye();
       delay(1000);
     
     } else if (currentMillis - lastInteractionTime > boredomInterval) {
       // 5. "ENTEDIADO"
+      currentEmotionString = "entediado";
       draw_bored_animation(); // (olha pros lados)
       lastInteractionTime = currentMillis; // Reseta o timer
     
     } else {
       // 6. "CONTENTE" (Default)
       center_eyes(true);
-      if (random(100) < 2) {
+      
+      // Sorteia um número de 0 a 1000
+      long sorteio = random(1000);
+
+      if (sorteio < 20) { 
+        // 2% de chance de Piscar (Aprox. a cada 5-10 seg)
         blink();
         delay(2000);
+      } 
+      else if (sorteio > 995) { 
+        // 0.5% de chance de Assobiar (Aprox. a cada 1-2 min)
+        play_whistle();
+        // Opcional: Faz uma cara feliz rápida enquanto assobia
+        draw_happy_eyes_replacement();
       }
     }
   } else {
-    // Se estiver dormindo
-    center_eyes(false);
-    left_eye_height = 2; right_eye_height = 2;
+    // Se estiver dormindo, amanheceu (ex: 08:00) e ele estava a dormir, ACORDA!
+    if (currentHour >= 8 && currentHour < 22 && estaDormindo) {
+        // Acorda automaticamente de manhã!
+        wakeup(); 
+        return;
+    }
+    center_eyes(false); 
+    left_eye_height = 2; 
+    right_eye_height = 2; 
     draw_eyes(true);
-    delay(1000);
+    currentEmotionString = "dormindo";
+
+    if (currentHour >= 22 || currentHour < 8) {
+       play_snore();
+       delay(2000);  // Pausa entre roncos
+    } else {
+       delay(1000);
+    }
   }
 }
 void loop() {
