@@ -1,4 +1,4 @@
-# Robomotion
+# Robotmotion
 
 Clone inspirado no Tamagotchi (Bandai) – um bichinho virtual autônomo com olhos animados em OLED, motor de emoções, mini‑jogo e controle via interface web + voz.
 
@@ -177,4 +177,4 @@ Verificação de integridade por `magicByte` para evitar lixo antigo.
 - Escolher licença
 - Expandir mini‑jogo / adicionar score online
 
-Bom cuidado com seu Robomotion! 🐾
+Bom cuidado com seu Robotmotion! 🐾
