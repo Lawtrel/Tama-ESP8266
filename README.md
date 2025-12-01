@@ -159,14 +159,12 @@ Verificação de integridade por `magicByte` para evitar lixo antigo.
 3. Commit claro (Português ou Inglês consistente)
 4. Pull Request com descrição e screenshots/gifs das animações
 
-## 📄 Licença
-Defina aqui uma licença (ex: MIT, Apache 2.0). Se desejar, aviso de uso não comercial também pode ser incluído.
-> Me avise qual licença prefere e atualizo esta secção.
 
 ## 🙏 Créditos
 - Inspiração: Tamagotchi (Bandai)
 - Bibliotecas: Adafruit SSD1306 / GFX, NTPClient
 - Comunidade Arduino & ESP8266
+- Feito por Alunos de Engenharia de Software da Uneb Campus II
 
 ## 🗨️ FAQ Rápido
 - "Ele não responde à voz": Verifique suporte `SpeechRecognition` e permissões de microfone.
